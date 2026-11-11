@@ -4067,9 +4067,9 @@ checksum = "163b33ed8786455e2fa5d72f554057ce3f3182425434f756cd39c99839d88e23"
 
 [[package]]
 name = "xdts"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "325d5cf6ed213a670bbab47bf92c2fc1fbc32d788ce1cd2b20ae01ee8e5468fc"
+checksum = "e938b6c9cde93913843b49cf69e8e8a6fa73c55c876f2f987f1317e6de7d4ba6"
 
 [[package]]
 name = "xkbcommon-dl"

@@ -5,4 +5,4 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-xdts = "0.1.0"
+xdts = "0.1.1"
