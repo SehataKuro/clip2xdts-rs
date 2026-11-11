@@ -46,7 +46,12 @@ jobs:
           Copy-Item README.md dist/
           Compress-Archive -Path dist/* -DestinationPath clip2xdts-windows-x64.zip
 
+      # 手で走らせて中身を見たいとき用。タグのときは下で Release に貼るので
+      # こちらは要らない。成果物の保存容量は Release とは別枠で、
+      # 上限に当たることがあるため、ここで落ちても止めない
       - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        continue-on-error: true
         with:
           name: clip2xdts-windows-x64
           path: clip2xdts-windows-x64.zip
