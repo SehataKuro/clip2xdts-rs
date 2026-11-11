@@ -1,7 +1,7 @@
 //! .clip ファイルの読み取りとタイムシート情報の組み立て
 
 use crate::sqlite::{Db, Row};
-use crate::xdts::{Frame, TimeTable, Track, Xdts, NULL_CELL};
+use crate::sheet::{Sheet, TimeTable, Track, NULL_CELL};
 use crate::{cmt, inflate};
 use std::collections::HashMap;
 
@@ -85,7 +85,7 @@ fn round_frame(x: f64) -> i64 {
 
 /// タイムライン 1 本につき 1 枚のシートを返す。
 /// 選択中だけなら 1 枚、`all_timelines` ならファイル内のタイムラインの数だけ返る
-pub fn convert(file: &[u8], opt: &Options) -> Result<Vec<Xdts>, String> {
+pub fn convert(file: &[u8], opt: &Options) -> Result<Vec<Sheet>, String> {
     let db = Db::open(find_sqlite(file)?)?;
     let mut ext = HashMap::new();
     if db.has_table("ExternalChunk") {
@@ -156,32 +156,34 @@ pub fn convert(file: &[u8], opt: &Options) -> Result<Vec<Xdts>, String> {
             let Some(row) = tracks.get(uuid) else { continue };
             names.push(name.clone());
             let (keys, end_frame) = track_keys(&clip, row, fps)?;
-            let mut frames: Vec<Frame> = Vec::new();
+            // 共有クレートの変化点モデル。フレーム番号は 0 起点の usize
+            let mut frames: Vec<(usize, String)> = Vec::new();
             for (fr, nm) in keys {
                 let v = nm.unwrap_or_else(|| NULL_CELL.to_string());
-                if frames.last().map(|f| f.value == v).unwrap_or(false) {
+                if frames.last().map(|(_, last)| *last == v).unwrap_or(false) {
                     continue;
                 }
-                frames.push(Frame { frame: fr, value: v });
+                frames.push((fr.max(0) as usize, v));
             }
             match (frames.last(), end_frame) {
-                (None, _) => frames.push(Frame { frame: 0, value: NULL_CELL.into() }),
-                (Some(l), Some(e)) if l.value != NULL_CELL => {
-                    frames.push(Frame { frame: e, value: NULL_CELL.into() })
+                (None, _) => frames.push((0, NULL_CELL.into())),
+                (Some((_, last)), Some(e)) if last != NULL_CELL => {
+                    frames.push((e.max(0) as usize, NULL_CELL.into()))
                 }
                 _ => {}
             }
             xtracks.push(Track { frames });
         }
-        sheets.push(Xdts {
+        sheets.push(Sheet {
             cut: tl.int("CutIndexForName").to_string(),
             scene: tl.int("SceneIndexForName").to_string(),
             tables: vec![TimeTable {
                 name: tl.get("TimeLineName").as_str().unwrap_or("").to_string(),
-                duration: round_frame(end - start),
-                names,
+                duration: round_frame(end - start).max(0) as usize,
+                columns: names,
                 tracks: xtracks,
             }],
+            ..Sheet::default()
         });
     }
     Ok(sheets)

@@ -1,6 +1,6 @@
 //! 入力の収集と、ファイル単位の変換・並列実行。CLI と GUI が共用する。
 
-use crate::{clip, tdts};
+use crate::{clip, sheet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -74,8 +74,8 @@ pub fn convert_one(src: &Path, job: &Job) -> Result<Vec<PathBuf>, String> {
         for ext in job.format.exts() {
             let dst = dir.join(sheet_name(&stem, i, sheets.len(), ext));
             let body = match *ext {
-                "tdts" => tdts::to_string(sheet),
-                _ => sheet.to_string(),
+                "tdts" => sheet::to_tdts(sheet),
+                _ => sheet::to_xdts(sheet),
             };
             std::fs::write(&dst, body).map_err(|e| format!("書き込めません: {}", e))?;
             dsts.push(dst);

@@ -1,7 +1,8 @@
 [package]
 name = "clip2xdts-core"
-description = ".clip からタイムシート (.xdts / .tdts) を組み立てる中核。外部 crate に依存しない"
+description = ".clip からタイムシート (.xdts / .tdts) を組み立てる中核"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
+xdts = { git = "https://github.com/SehataKuro/xdts", rev = "8db578c" }

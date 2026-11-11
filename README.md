@@ -39,6 +39,8 @@ GUI だけ要らない場合は `cargo build --release -p clip2xdts` で CLI だ
 | `.xdts` | 汎用デジタルタイムシート version 5。CLIP STUDIO PAINT EX の標準書き出しと同じ |
 | `.tdts` | 東映アニメーション デジタルタイムシート version 7 |
 
+読み込みにも対応していて、書き出した `.xdts` / `.tdts` をそのまま読み返せます。
+
 `.tdts` は `.xdts` と同系統の JSON（1 行目にマジック行、以降 2 スペース整形）ですが、全体を
 `timeSheets[]` で包み、セルに `fontColorId` が付き、文字色表・作業伝票の枠を持ちます。
 `.clip` には作業伝票・作業者名・話数の情報が無いので、そこは東映 DTS の既定値（空）で埋めます。
@@ -63,12 +65,14 @@ GUI だけ要らない場合は `cargo build --release -p clip2xdts` で CLI だ
 ## 構成
 
 3 つの crate のワークスペースです。変換の中身は `core` だけにあり、CLI と GUI は
-その薄い皮です。`core` は**外部 crate に依存しません**。GUI の依存（egui / rfd）は
-`gui` の中だけに閉じているので、CLI は従来どおり依存ゼロで作れます。
+その薄い皮です。XDTS / TDTS 自体の読み書きは共有クレート
+[SehataKuro/xdts](https://github.com/SehataKuro/xdts) にあり、`core` の依存はこれ 1 つだけ
+（xdts 側は依存ゼロなので、依存ツリーはこれで終わり）。GUI の依存（egui / rfd）は
+`gui` の中だけに閉じています。
 
 | crate | 内容 |
 |---|---|
-| `crates/core` | .clip の読み取りと XDTS / TDTS の書き出し。依存なし |
+| `crates/core` | .clip の読み取りと XDTS / TDTS の組み立て。依存は `xdts` のみ |
 | `crates/cli`  | `clip2xdts` コマンド |
 | `crates/gui`  | `clip2xdts-gui`（egui / rfd） |
 
@@ -80,6 +84,5 @@ GUI だけ要らない場合は `cargo build --release -p clip2xdts` で CLI だ
 | `sqlite.rs`  | 読み取り専用の最小 SQLite リーダー |
 | `inflate.rs` | zlib 展開 |
 | `cmt.rs`     | TrackActionMixer（`cmt 0110 binc` 形式）のパーサー |
-| `xdts.rs`    | XDTS の JSON 出力と、共用の JSON ライター |
-| `tdts.rs`    | TDTS の JSON 出力 |
+| `sheet.rs`   | 共有クレート `xdts` への薄い皮（書き出し・読み込み）と形式のテスト |
 | `job.rs`     | 入力の収集と、ファイル単位の並列変換（CLI と GUI が共用） |
