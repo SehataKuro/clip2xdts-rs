@@ -5,6 +5,11 @@ use crate::sqlite::{Db, Row};
 use crate::{cmt, inflate};
 use std::collections::HashMap;
 
+/// 東映 DTS が保存したシートが持つダミーコマ数。頭に 1 秒、尻に 2 秒ぶん。
+/// 実機の保存ファイル 2 本（別の作品のものを含む）がどちらもこの値だった
+pub(crate) const HEAD_DUMMY: usize = 24;
+pub(crate) const FOOT_DUMMY: usize = 48;
+
 pub struct Options {
     pub all_timelines: bool,
 }
@@ -201,6 +206,11 @@ pub fn convert(file: &[u8], opt: &Options) -> Result<Vec<Sheet>, String> {
                 duration: round_frame(end - start).max(0) as usize,
                 columns: names,
                 tracks: xtracks,
+                // 東映 DTS が保存したシートは頭に 24 コマ・尻に 48 コマの
+                // ダミーを持つ。.clip には無い情報なので、実機の値で埋める
+                // （.xdts には出ない。TDTS だけが持つ項目）
+                head_dummy: HEAD_DUMMY,
+                foot_dummy: FOOT_DUMMY,
                 // 台詞欄・カメラ欄は .clip に情報が無いので空のまま
                 ..TimeTable::default()
             }],

@@ -114,6 +114,19 @@ mod tests {
         assert!(to_tdts(&x).contains("\"name\": \"sheet1\""));
     }
 
+    /// 東映 DTS の保存ファイルはダミーコマを持つ。.clip には無い情報なので
+    /// 実機の値で埋めている。`.xdts` 側はこの項目を持たない
+    #[test]
+    fn tdts_carries_the_dummy_frames() {
+        let mut x = sheet();
+        x.tables[0].head_dummy = crate::clip::HEAD_DUMMY;
+        x.tables[0].foot_dummy = crate::clip::FOOT_DUMMY;
+        let s = to_tdts(&x);
+        assert!(s.contains("\"headDummykomas\": 24"));
+        assert!(s.contains("\"footDummykomas\": 48"));
+        assert!(!to_xdts(&x).contains("Dummykoma"));
+    }
+
     #[test]
     fn work_slip_is_empty_but_present() {
         let s = to_tdts(&sheet());
