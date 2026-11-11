@@ -38,11 +38,13 @@ mod tests {
         }
     }
 
+    /// 実機が保存したシートは version 10。version 7 は仕様書からの推測で、
+    /// 実物が出てきて共有クレート側が直した
     #[test]
     fn magic_line_and_version() {
         let s = to_tdts(&sheet());
-        assert!(s.starts_with("toeiDigitalTimeSheet Save Data\r\n"));
-        assert!(s.contains("\"version\": 7"));
+        assert!(s.starts_with("toeiDigitalTimeSheet Save Data\n"));
+        assert!(s.contains("\"version\": 10"));
         assert!(s.contains("\"timeSheets\": ["));
     }
 
@@ -54,10 +56,14 @@ mod tests {
         assert!(!s.contains("timeSheets"), "XDTS は timeSheets で包まない");
     }
 
+    /// どちらの形式も LF。TDTS を CRLF で書いていたのは推測で、
+    /// 実機が保存したシートは LF だった
     #[test]
-    fn crlf_everywhere() {
-        let s = to_tdts(&sheet());
-        assert!(!s.replace("\r\n", "").contains('\n'), "LF が残っている");
+    fn lf_everywhere() {
+        assert!(
+            !to_tdts(&sheet()).contains('\r'),
+            "TDTS に CR が混ざっている"
+        );
         assert!(
             !to_xdts(&sheet()).contains('\r'),
             "XDTS に CR が混ざっている"
@@ -70,9 +76,9 @@ mod tests {
         // 東映 DTS は data 要素に fontColorId を持つ（XDTS には無い）
         assert!(s.contains("\"fontColorId\": 0"));
         assert!(!to_xdts(&sheet()).contains("fontColorId"));
-        assert!(s.contains(
-            "\"values\": [\r\n                            \"1\"\r\n                          ]"
-        ));
+        // セルの値は values の中。字下げの深さは見ない
+        let flat = s.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(flat.contains("\"values\": [ \"1\" ]"));
         assert!(s.contains(NULL_CELL));
     }
 
