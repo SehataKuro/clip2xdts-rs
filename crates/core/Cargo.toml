@@ -5,4 +5,4 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-xdts = { git = "https://github.com/SehataKuro/xdts", rev = "8db578c" }
+xdts = { git = "https://github.com/SehataKuro/xdts", rev = "4c80be3" }

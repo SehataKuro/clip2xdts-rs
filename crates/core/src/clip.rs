@@ -182,6 +182,8 @@ pub fn convert(file: &[u8], opt: &Options) -> Result<Vec<Sheet>, String> {
                 duration: round_frame(end - start).max(0) as usize,
                 columns: names,
                 tracks: xtracks,
+                // 台詞欄・カメラ欄は .clip に情報が無いので空のまま
+                ..TimeTable::default()
             }],
             ..Sheet::default()
         });

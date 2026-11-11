@@ -4068,7 +4068,7 @@ checksum = "163b33ed8786455e2fa5d72f554057ce3f3182425434f756cd39c99839d88e23"
 [[package]]
 name = "xdts"
 version = "0.1.0"
-source = "git+https://github.com/SehataKuro/xdts?rev=8db578c#8db578c22a5296c0bdb5eb778f052b234624b159"
+source = "git+https://github.com/SehataKuro/xdts?rev=4c80be3#4c80be36ea3713d01cadcf9178ef19534c0a9b59"
 
 [[package]]
 name = "xkbcommon-dl"

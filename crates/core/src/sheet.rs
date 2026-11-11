@@ -32,6 +32,7 @@ mod tests {
                 tracks: vec![Track {
                     frames: vec![(0, "1".into()), (12, "2".into()), (24, NULL_CELL.into())],
                 }],
+                ..TimeTable::default()
             }],
             ..Sheet::default()
         }
@@ -87,6 +88,7 @@ mod tests {
             duration: 12,
             columns: vec!["A".into()],
             tracks: vec![Track::default()],
+            ..TimeTable::default()
         });
         let s = to_tdts(&x);
         assert!(s.contains("\"name\": \"sheet1\""));
@@ -126,6 +128,7 @@ mod tests {
             duration: 8,
             columns: vec!["背景".into(), "キャラ".into()],
             tracks: vec![Track { frames: vec![(0, "1".into())] }, Track::default()],
+            ..TimeTable::default()
         });
         for text in [to_xdts(&x), to_tdts(&x)] {
             let back = from_str(&text).unwrap();
