@@ -1,0 +1,68 @@
+# Windows 向けの exe を組み立てる。
+#
+# 手で走らせれば成果物として置かれ、v から始まるタグを push すると
+# そのタグの Release に貼られる。
+#
+# 外のアクションは actions/checkout と actions/upload-artifact だけ。
+# Rust は GitHub のランナーに元から入っている rustup を使い、
+# 入れ直すものを増やさない。
+
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: build exe (windows)
+    runs-on: windows-latest
+    # タグのときだけ Release に貼るので、書き込みはそのために要る
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup update stable && rustup default stable
+
+      # 配るものがテストを通っていない、ということが起きないようにする
+      - run: cargo test --workspace
+      - run: cargo build --release --workspace
+
+      # CLI と GUI の 2 本をまとめて 1 つの zip にする
+      - name: zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/clip2xdts.exe dist/
+          Copy-Item target/release/clip2xdts-gui.exe dist/
+          Copy-Item README.md dist/
+          Compress-Archive -Path dist/* -DestinationPath clip2xdts-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clip2xdts-windows-x64
+          path: clip2xdts-windows-x64.zip
+          if-no-files-found: error
+
+      - name: attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          # Release が先に作られていることもあるので、無ければ作る
+          if (gh release view $tag 2>$null) {
+            gh release upload $tag clip2xdts-windows-x64.zip --clobber
+          } else {
+            gh release create $tag clip2xdts-windows-x64.zip --generate-notes --verify-tag
+          }
+

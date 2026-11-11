@@ -14,6 +14,11 @@ CLIP STUDIO PAINT の `.clip` から、タイムシート `.xdts` / `.tdts` を�
 
 GUI だけ要らない場合は `cargo build --release -p clip2xdts` で CLI だけ作れます。
 
+Windows 向けの exe は GitHub Actions の `Release` でも作れます。手で走らせると
+`clip2xdts-windows-x64.zip`（CLI・GUI・README）が成果物として置かれ、`v` から
+始まるタグを push すると、そのタグの Release に同じ zip が貼られます。どちらも
+テストを通してからビルドします。
+
 ## GUI
 
     clip2xdts-gui
