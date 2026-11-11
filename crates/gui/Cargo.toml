@@ -1,0 +1,15 @@
+[package]
+name = "clip2xdts-gui"
+description = ".clip をドラッグ＆ドロップでタイムシートに変換する GUI"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "clip2xdts-gui"
+path = "src/main.rs"
+
+[dependencies]
+clip2xdts-core.workspace = true
+eframe = "0.35.0"
+egui = "0.35.0"
+rfd = "0.18.0"

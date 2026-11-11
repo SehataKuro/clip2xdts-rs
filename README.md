@@ -1,13 +1,29 @@
 # clip2xdts
 
-CLIP STUDIO PAINT の `.clip` から、タイムシート `.xdts` / `.tdts` をまとめて書き出す CLI です。
-クリスタ本体は不要で、PRO 版のファイルでも変換できます。外部 crate への依存はありません。
+CLIP STUDIO PAINT の `.clip` から、タイムシート `.xdts` / `.tdts` をまとめて書き出します。
+クリスタ本体は不要で、PRO 版のファイルでも変換できます。CLI と GUI の両方があります。
 
 ## ビルド
 
     cargo build --release
 
-## 使い方
+できるもの:
+
+- `target/release/clip2xdts`（CLI）
+- `target/release/clip2xdts-gui`（GUI）
+
+GUI だけ要らない場合は `cargo build --release -p clip2xdts` で CLI だけ作れます。
+
+## GUI
+
+    clip2xdts-gui
+
+`.clip` ファイルかフォルダを窓に落として、形式を選んで「変換」を押すだけです。
+フォルダはサブフォルダまで辿ります。出力先は既定で `.clip` と同じ場所、
+ボタンから別のフォルダも選べます。日本語の表示には OS に入っているフォント
+（Windows なら游ゴシック→メイリオ→MS ゴシックの順）を使います。
+
+## CLI
 
     clip2xdts カット/*.clip            # 各 .clip の隣に .xdts を作る
     clip2xdts -o xdts/ カット/          # フォルダ内（サブフォルダ含む）の .clip を一括変換
@@ -44,11 +60,24 @@ CLIP STUDIO PAINT の `.clip` から、タイムシート `.xdts` / `.tdts` を�
 
 ## 構成
 
+3 つの crate のワークスペースです。変換の中身は `core` だけにあり、CLI と GUI は
+その薄い皮です。`core` は**外部 crate に依存しません**。GUI の依存（egui / rfd）は
+`gui` の中だけに閉じているので、CLI は従来どおり依存ゼロで作れます。
+
+| crate | 内容 |
+|---|---|
+| `crates/core` | .clip の読み取りと XDTS / TDTS の書き出し。依存なし |
+| `crates/cli`  | `clip2xdts` コマンド |
+| `crates/gui`  | `clip2xdts-gui`（egui / rfd） |
+
+`crates/core` の中身:
+
 | ファイル | 内容 |
 |---|---|
-| `src/clip.rs`    | .clip のチャンク読み取り、タイムラインから XDTS への変換 |
-| `src/sqlite.rs`  | 読み取り専用の最小 SQLite リーダー |
-| `src/inflate.rs` | zlib 展開 |
-| `src/cmt.rs`     | TrackActionMixer（`cmt 0110 binc` 形式）のパーサー |
-| `src/xdts.rs`    | XDTS の JSON 出力と、共用の JSON ライター |
-| `src/tdts.rs`    | TDTS の JSON 出力 |
+| `clip.rs`    | .clip のチャンク読み取り、タイムラインから XDTS への変換 |
+| `sqlite.rs`  | 読み取り専用の最小 SQLite リーダー |
+| `inflate.rs` | zlib 展開 |
+| `cmt.rs`     | TrackActionMixer（`cmt 0110 binc` 形式）のパーサー |
+| `xdts.rs`    | XDTS の JSON 出力と、共用の JSON ライター |
+| `tdts.rs`    | TDTS の JSON 出力 |
+| `job.rs`     | 入力の収集と、ファイル単位の並列変換（CLI と GUI が共用） |

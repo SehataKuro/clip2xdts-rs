@@ -1,0 +1,12 @@
+[package]
+name = "clip2xdts"
+description = ".clip からタイムシート (.xdts / .tdts) を一括書き出しする CLI"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "clip2xdts"
+path = "src/main.rs"
+
+[dependencies]
+clip2xdts-core.workspace = true
