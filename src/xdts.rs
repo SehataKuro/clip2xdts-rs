@@ -25,8 +25,9 @@ pub struct Xdts {
 }
 
 /// 小さな JSON 木。Python の json.dumps(indent=2, ensure_ascii=False) と同じ見た目で出す
-enum J {
+pub(crate) enum J {
     Int(i64),
+    Bool(bool),
     Str(String),
     Arr(Vec<J>),
     Obj(Vec<(&'static str, J)>),
@@ -50,10 +51,11 @@ fn esc(s: &str, out: &mut String) {
     out.push('"');
 }
 
-fn write(j: &J, ind: usize, out: &mut String) {
+pub(crate) fn write(j: &J, ind: usize, out: &mut String) {
     let pad = |n: usize, out: &mut String| out.extend(std::iter::repeat(' ').take(n));
     match j {
         J::Int(v) => out.push_str(&v.to_string()),
+        J::Bool(v) => out.push_str(if *v { "true" } else { "false" }),
         J::Str(s) => esc(s, out),
         J::Arr(a) if a.is_empty() => out.push_str("[]"),
         J::Obj(o) if o.is_empty() => out.push_str("{}"),
