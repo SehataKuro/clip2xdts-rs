@@ -1,7 +1,7 @@
 //! タイムシートの書き出しと読み込み。中身は共有クレート [`xdts`] にあり、
 //! ここはその薄い皮と、形式が変わっていないことを見張るテストだけ。
 
-pub use xdts::{Sheet, TimeTable, Track, NULL_CELL};
+pub use xdts::{NULL_CELL, Sheet, TimeTable, Track};
 
 /// 汎用デジタルタイムシート（XDTS、version 5）のテキスト
 pub fn to_xdts(sheet: &Sheet) -> String {
@@ -58,7 +58,10 @@ mod tests {
     fn crlf_everywhere() {
         let s = to_tdts(&sheet());
         assert!(!s.replace("\r\n", "").contains('\n'), "LF が残っている");
-        assert!(!to_xdts(&sheet()).contains('\r'), "XDTS に CR が混ざっている");
+        assert!(
+            !to_xdts(&sheet()).contains('\r'),
+            "XDTS に CR が混ざっている"
+        );
     }
 
     #[test]
@@ -67,7 +70,9 @@ mod tests {
         // 東映 DTS は data 要素に fontColorId を持つ（XDTS には無い）
         assert!(s.contains("\"fontColorId\": 0"));
         assert!(!to_xdts(&sheet()).contains("fontColorId"));
-        assert!(s.contains("\"values\": [\r\n                            \"1\"\r\n                          ]"));
+        assert!(s.contains(
+            "\"values\": [\r\n                            \"1\"\r\n                          ]"
+        ));
         assert!(s.contains(NULL_CELL));
     }
 
@@ -75,24 +80,32 @@ mod tests {
     fn headers_cover_field_0_to_5() {
         let s = to_tdts(&sheet());
         for id in 0..=5 {
-            assert!(s.contains(&format!("\"fieldId\": {}", id)), "fieldId {} が無い", id);
+            assert!(
+                s.contains(&format!("\"fieldId\": {}", id)),
+                "fieldId {} が無い",
+                id
+            );
         }
         assert!(s.contains("\"S1\""), "台詞欄のヘッダが無い");
     }
 
+    /// 1 枚のシートは 1 つの timeSheets 要素になる。
+    /// 中の timeTables は「同じシートの改訂」なので、
+    /// タイムラインごとに 1 枚ずつ書き出す今の作りでは常に 1 つ
     #[test]
-    fn sheet_name_is_sequential() {
+    fn one_sheet_is_one_time_sheet() {
+        let s = to_tdts(&sheet());
+        assert_eq!(s.matches("\"timeTables\": [").count(), 1);
+        // 名前は与えたものがそのまま残る（連番で潰さない）
+        assert!(s.contains("\"name\": \"cut001\""));
+    }
+
+    /// 名前の無いシートだけ、東映 DTS に合わせて sheet1 と呼ぶ
+    #[test]
+    fn a_nameless_table_is_called_sheet1() {
         let mut x = sheet();
-        x.tables.push(TimeTable {
-            name: "cut002".into(),
-            duration: 12,
-            columns: vec!["A".into()],
-            tracks: vec![Track::default()],
-            ..TimeTable::default()
-        });
-        let s = to_tdts(&x);
-        assert!(s.contains("\"name\": \"sheet1\""));
-        assert!(s.contains("\"name\": \"sheet2\""));
+        x.tables[0].name = String::new();
+        assert!(to_tdts(&x).contains("\"name\": \"sheet1\""));
     }
 
     #[test]
@@ -127,14 +140,22 @@ mod tests {
             name: "cut002".into(),
             duration: 8,
             columns: vec!["背景".into(), "キャラ".into()],
-            tracks: vec![Track { frames: vec![(0, "1".into())] }, Track::default()],
+            tracks: vec![
+                Track {
+                    frames: vec![(0, "1".into())],
+                },
+                Track::default(),
+            ],
             ..TimeTable::default()
         });
         for text in [to_xdts(&x), to_tdts(&x)] {
             let back = from_str(&text).unwrap();
             assert_eq!(back.scene, "12");
             assert_eq!(back.tables.len(), 2);
-            assert_eq!(back.tables[1].columns, vec!["背景".to_string(), "キャラ".to_string()]);
+            assert_eq!(
+                back.tables[1].columns,
+                vec!["背景".to_string(), "キャラ".to_string()]
+            );
             assert_eq!(back.tables[1].tracks, x.tables[1].tracks);
             // name は TDTS では sheetN に振り直されるので、比較はセルだけ
             assert_eq!(back.tables[0].tracks, x.tables[0].tracks);

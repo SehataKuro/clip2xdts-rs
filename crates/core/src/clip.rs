@@ -1,7 +1,7 @@
 //! .clip ファイルの読み取りとタイムシート情報の組み立て
 
+use crate::sheet::{NULL_CELL, Sheet, TimeTable, Track};
 use crate::sqlite::{Db, Row};
-use crate::sheet::{Sheet, TimeTable, Track, NULL_CELL};
 use crate::{cmt, inflate};
 use std::collections::HashMap;
 
@@ -48,7 +48,9 @@ struct Clip<'a> {
 impl<'a> Clip<'a> {
     /// ExternalChunk の中身（zlib 展開済み）
     fn external(&self, id: &[u8]) -> Result<Option<Vec<u8>>, String> {
-        let Some(&off) = self.ext.get(id) else { return Ok(None) };
+        let Some(&off) = self.ext.get(id) else {
+            return Ok(None);
+        };
         let d = self.data;
         if off + 24 > d.len() || &d[off..off + 8] != b"CHNKExta" {
             return Ok(None);
@@ -61,7 +63,9 @@ impl<'a> Clip<'a> {
         }
         let dsize = be64(&d[p..]) as usize;
         p += 8;
-        let body = d.get(p..p + dsize).ok_or("外部チャンクが途中で終わっています")?;
+        let body = d
+            .get(p..p + dsize)
+            .ok_or("外部チャンクが途中で終わっています")?;
         if body.len() > 4 && body[4] == 0x78 {
             Ok(Some(inflate::zlib_decompress(&body[4..])?))
         } else {
@@ -72,7 +76,9 @@ impl<'a> Clip<'a> {
 
 fn uuid_key(v: &[u8], is_text: bool) -> String {
     if is_text {
-        String::from_utf8_lossy(v).replace('-', "").to_ascii_lowercase()
+        String::from_utf8_lossy(v)
+            .replace('-', "")
+            .to_ascii_lowercase()
     } else {
         v.iter().map(|b| format!("{:02x}", b)).collect()
     }
@@ -95,7 +101,11 @@ pub fn convert(file: &[u8], opt: &Options) -> Result<Vec<Sheet>, String> {
             }
         }
     }
-    let clip = Clip { data: file, db, ext };
+    let clip = Clip {
+        data: file,
+        db,
+        ext,
+    };
     let db = &clip.db;
 
     if !db.has_table("AnimationCutBank") || !db.has_table("TimeLine") {
@@ -121,7 +131,11 @@ pub fn convert(file: &[u8], opt: &Options) -> Result<Vec<Sheet>, String> {
         return Err("タイムラインがありません".into());
     }
     let cur = (bank.int("CurrentIndex").max(0) as usize).min(tls.len() - 1);
-    let targets: Vec<&Row> = if opt.all_timelines { tls.clone() } else { vec![tls[cur]] };
+    let targets: Vec<&Row> = if opt.all_timelines {
+        tls.clone()
+    } else {
+        vec![tls[cur]]
+    };
 
     let folders = visible_anim_folders(db)?;
     let track_rows = db.rows("Track")?;
@@ -153,7 +167,9 @@ pub fn convert(file: &[u8], opt: &Options) -> Result<Vec<Sheet>, String> {
         let mut names = Vec::new();
         let mut xtracks = Vec::new();
         for (name, uuid) in &folders {
-            let Some(row) = tracks.get(uuid) else { continue };
+            let Some(row) = tracks.get(uuid) else {
+                continue;
+            };
             names.push(name.clone());
             let (keys, end_frame) = track_keys(&clip, row, fps)?;
             // 共有クレートの変化点モデル。フレーム番号は 0 起点の usize
@@ -172,7 +188,10 @@ pub fn convert(file: &[u8], opt: &Options) -> Result<Vec<Sheet>, String> {
                 }
                 _ => {}
             }
-            xtracks.push(Track { frames });
+            // 変化点は文字列で畳んでから、クレートの Cell に移す（p1 のマークは .clip から出ない）
+            xtracks.push(Track {
+                frames: frames.into_iter().map(|(f, v)| (f, v.into())).collect(),
+            });
         }
         sheets.push(Sheet {
             cut: tl.int("CutIndexForName").to_string(),
@@ -196,7 +215,10 @@ fn visible_anim_folders(db: &Db) -> Result<Vec<(String, String)>, String> {
     let rows = db.rows("Layer")?;
     let by_id: HashMap<i64, &Row> = rows.iter().map(|r| (r.int("MainId"), r)).collect();
     let canvas = db.rows("Canvas")?;
-    let root = canvas.first().ok_or("キャンバスがありません")?.int("CanvasRootFolder");
+    let root = canvas
+        .first()
+        .ok_or("キャンバスがありません")?
+        .int("CanvasRootFolder");
     let root = *by_id.get(&root).ok_or("ルートフォルダがありません")?;
     let mut out = Vec::new();
     let mut visited = 0usize;
@@ -226,17 +248,35 @@ fn visible_anim_folders(db: &Db) -> Result<Vec<(String, String)>, String> {
                     out.push((r.get("LayerName").as_str().unwrap_or("").to_string(), key));
                 }
             } else if r.int("LayerFirstChildIndex") != 0 {
-                walk(r.int("LayerFirstChildIndex"), v, by_id, out, visited, depth + 1);
+                walk(
+                    r.int("LayerFirstChildIndex"),
+                    v,
+                    by_id,
+                    out,
+                    visited,
+                    depth + 1,
+                );
             }
             i = r.int("LayerNextIndex");
         }
     }
-    walk(root.int("LayerFirstChildIndex"), true, &by_id, &mut out, &mut visited, 0);
+    walk(
+        root.int("LayerFirstChildIndex"),
+        true,
+        &by_id,
+        &mut out,
+        &mut visited,
+        0,
+    );
     Ok(out)
 }
 
 /// トラックの (コマ, セル名 / None=空セル) と、クリップ終端のコマを返す
-fn track_keys(clip: &Clip, row: &Row, fps: f64) -> Result<(Vec<(i64, Option<String>)>, Option<i64>), String> {
+fn track_keys(
+    clip: &Clip,
+    row: &Row,
+    fps: f64,
+) -> Result<(Vec<(i64, Option<String>)>, Option<i64>), String> {
     let mut raw = None;
     for col in ["TrackActionMixer2", "TrackActionMixer"] {
         if let Some(id) = row.get(col).as_bytes() {
@@ -246,7 +286,9 @@ fn track_keys(clip: &Clip, row: &Row, fps: f64) -> Result<(Vec<(i64, Option<Stri
             }
         }
     }
-    let Some(raw) = raw else { return Ok((Vec::new(), None)) };
+    let Some(raw) = raw else {
+        return Ok((Vec::new(), None));
+    };
     let doc = cmt::parse(&raw)?;
     let mut keys = Vec::new();
     let mut end_frame = None;

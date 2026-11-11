@@ -11,4 +11,4 @@ pub mod sheet;
 mod sqlite;
 
 mod job;
-pub use job::{collect_clips, Format, Job, convert_one, run_batch};
+pub use job::{Format, Job, collect_clips, convert_one, run_batch};

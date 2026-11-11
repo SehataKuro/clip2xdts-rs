@@ -2,8 +2,8 @@
 
 use crate::{clip, sheet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// 書き出す形式
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -51,7 +51,11 @@ pub fn collect_clips(p: &Path, out: &mut Vec<PathBuf>) {
         for e in ents {
             if e.is_dir() {
                 collect_clips(&e, out);
-            } else if e.extension().map(|x| x.eq_ignore_ascii_case("clip")).unwrap_or(false) {
+            } else if e
+                .extension()
+                .map(|x| x.eq_ignore_ascii_case("clip"))
+                .unwrap_or(false)
+            {
                 out.push(e);
             }
         }
@@ -64,10 +68,16 @@ pub fn collect_clips(p: &Path, out: &mut Vec<PathBuf>) {
 pub fn convert_one(src: &Path, job: &Job) -> Result<Vec<PathBuf>, String> {
     let data = std::fs::read(src).map_err(|e| format!("読み込めません: {}", e))?;
     let sheets = clip::convert(&data, &job.options)?;
-    let stem = src.file_stem().map(|s| s.to_os_string()).unwrap_or_else(|| "out".into());
+    let stem = src
+        .file_stem()
+        .map(|s| s.to_os_string())
+        .unwrap_or_else(|| "out".into());
     let dir = match job.out_dir {
         Some(d) => d.to_path_buf(),
-        None => src.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from(".")),
+        None => src
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from(".")),
     };
     let mut dsts = Vec::new();
     for (i, sheet) in sheets.iter().enumerate() {
@@ -108,14 +118,16 @@ pub fn run_batch(
         Mutex::new((0..files.len()).map(|_| None).collect());
     std::thread::scope(|s| {
         for _ in 0..job.jobs.max(1).min(files.len().max(1)) {
-            s.spawn(|| loop {
-                let i = next.fetch_add(1, Ordering::SeqCst);
-                if i >= files.len() {
-                    break;
+            s.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, Ordering::SeqCst);
+                    if i >= files.len() {
+                        break;
+                    }
+                    let r = convert_one(&files[i], job);
+                    results.lock().unwrap()[i] = Some(r);
+                    done();
                 }
-                let r = convert_one(&files[i], job);
-                results.lock().unwrap()[i] = Some(r);
-                done();
             });
         }
     });
@@ -134,19 +146,37 @@ mod tests {
 
     #[test]
     fn single_sheet_keeps_the_plain_name() {
-        assert_eq!(sheet_name(OsStr::new("a"), 0, 1, "xdts"), OsStr::new("a.xdts"));
-        assert_eq!(sheet_name(OsStr::new("カット001"), 0, 1, "tdts"), OsStr::new("カット001.tdts"));
+        assert_eq!(
+            sheet_name(OsStr::new("a"), 0, 1, "xdts"),
+            OsStr::new("a.xdts")
+        );
+        assert_eq!(
+            sheet_name(OsStr::new("カット001"), 0, 1, "tdts"),
+            OsStr::new("カット001.tdts")
+        );
     }
 
     #[test]
     fn several_sheets_get_a_number() {
-        assert_eq!(sheet_name(OsStr::new("a"), 0, 3, "xdts"), OsStr::new("a_sheet1.xdts"));
-        assert_eq!(sheet_name(OsStr::new("a"), 1, 3, "xdts"), OsStr::new("a_sheet2.xdts"));
-        assert_eq!(sheet_name(OsStr::new("a"), 2, 3, "tdts"), OsStr::new("a_sheet3.tdts"));
+        assert_eq!(
+            sheet_name(OsStr::new("a"), 0, 3, "xdts"),
+            OsStr::new("a_sheet1.xdts")
+        );
+        assert_eq!(
+            sheet_name(OsStr::new("a"), 1, 3, "xdts"),
+            OsStr::new("a_sheet2.xdts")
+        );
+        assert_eq!(
+            sheet_name(OsStr::new("a"), 2, 3, "tdts"),
+            OsStr::new("a_sheet3.tdts")
+        );
     }
 
     #[test]
     fn a_dot_in_the_name_is_left_alone() {
-        assert_eq!(sheet_name(OsStr::new("c.01"), 1, 2, "xdts"), OsStr::new("c.01_sheet2.xdts"));
+        assert_eq!(
+            sheet_name(OsStr::new("c.01"), 1, 2, "xdts"),
+            OsStr::new("c.01_sheet2.xdts")
+        );
     }
 }
