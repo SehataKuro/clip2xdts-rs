@@ -63,26 +63,37 @@ pub fn collect_clips(p: &Path, out: &mut Vec<PathBuf>) {
 /// 1 ファイルを変換し、書き出した先を返す
 pub fn convert_one(src: &Path, job: &Job) -> Result<Vec<PathBuf>, String> {
     let data = std::fs::read(src).map_err(|e| format!("読み込めません: {}", e))?;
-    let x = clip::convert(&data, &job.options)?;
+    let sheets = clip::convert(&data, &job.options)?;
     let stem = src.file_stem().map(|s| s.to_os_string()).unwrap_or_else(|| "out".into());
     let dir = match job.out_dir {
         Some(d) => d.to_path_buf(),
         None => src.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from(".")),
     };
     let mut dsts = Vec::new();
-    for ext in job.format.exts() {
-        let mut name = stem.clone();
-        name.push(".");
-        name.push(ext);
-        let dst = dir.join(name);
-        let body = match *ext {
-            "tdts" => tdts::to_string(&x),
-            _ => x.to_string(),
-        };
-        std::fs::write(&dst, body).map_err(|e| format!("書き込めません: {}", e))?;
-        dsts.push(dst);
+    for (i, sheet) in sheets.iter().enumerate() {
+        for ext in job.format.exts() {
+            let dst = dir.join(sheet_name(&stem, i, sheets.len(), ext));
+            let body = match *ext {
+                "tdts" => tdts::to_string(sheet),
+                _ => sheet.to_string(),
+            };
+            std::fs::write(&dst, body).map_err(|e| format!("書き込めません: {}", e))?;
+            dsts.push(dst);
+        }
     }
     Ok(dsts)
+}
+
+/// 書き出すファイル名。シートが 1 枚なら `a.xdts`、
+/// 複数なら `a_sheet1.xdts` `a_sheet2.xdts` … と連番を付ける
+fn sheet_name(stem: &std::ffi::OsStr, i: usize, total: usize, ext: &str) -> std::ffi::OsString {
+    let mut name = stem.to_os_string();
+    if total > 1 {
+        name.push(format!("_sheet{}", i + 1));
+    }
+    name.push(".");
+    name.push(ext);
+    name
 }
 
 /// ファイル単位で並列に変換する。結果は入力と同じ順で返る。
@@ -114,4 +125,28 @@ pub fn run_batch(
         .into_iter()
         .map(|r| r.unwrap_or_else(|| Err("処理されませんでした".into())))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sheet_name;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn single_sheet_keeps_the_plain_name() {
+        assert_eq!(sheet_name(OsStr::new("a"), 0, 1, "xdts"), OsStr::new("a.xdts"));
+        assert_eq!(sheet_name(OsStr::new("カット001"), 0, 1, "tdts"), OsStr::new("カット001.tdts"));
+    }
+
+    #[test]
+    fn several_sheets_get_a_number() {
+        assert_eq!(sheet_name(OsStr::new("a"), 0, 3, "xdts"), OsStr::new("a_sheet1.xdts"));
+        assert_eq!(sheet_name(OsStr::new("a"), 1, 3, "xdts"), OsStr::new("a_sheet2.xdts"));
+        assert_eq!(sheet_name(OsStr::new("a"), 2, 3, "tdts"), OsStr::new("a_sheet3.tdts"));
+    }
+
+    #[test]
+    fn a_dot_in_the_name_is_left_alone() {
+        assert_eq!(sheet_name(OsStr::new("c.01"), 1, 2, "xdts"), OsStr::new("c.01_sheet2.xdts"));
+    }
 }

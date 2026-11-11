@@ -83,7 +83,9 @@ fn round_frame(x: f64) -> i64 {
     x.round_ties_even() as i64
 }
 
-pub fn convert(file: &[u8], opt: &Options) -> Result<Xdts, String> {
+/// タイムライン 1 本につき 1 枚のシートを返す。
+/// 選択中だけなら 1 枚、`all_timelines` ならファイル内のタイムラインの数だけ返る
+pub fn convert(file: &[u8], opt: &Options) -> Result<Vec<Xdts>, String> {
     let db = Db::open(find_sqlite(file)?)?;
     let mut ext = HashMap::new();
     if db.has_table("ExternalChunk") {
@@ -125,7 +127,7 @@ pub fn convert(file: &[u8], opt: &Options) -> Result<Xdts, String> {
     let track_rows = db.rows("Track")?;
     let tr_by_id: HashMap<i64, &Row> = track_rows.iter().map(|r| (r.int("MainId"), r)).collect();
 
-    let mut tables = Vec::new();
+    let mut sheets = Vec::new();
     for tl in &targets {
         let fps = tl.get("FrameRate").as_f64().unwrap_or(24.0);
         let start = tl.get("StartFrame").as_f64().unwrap_or(0.0);
@@ -171,19 +173,18 @@ pub fn convert(file: &[u8], opt: &Options) -> Result<Xdts, String> {
             }
             xtracks.push(Track { frames });
         }
-        tables.push(TimeTable {
-            name: tl.get("TimeLineName").as_str().unwrap_or("").to_string(),
-            duration: round_frame(end - start),
-            names,
-            tracks: xtracks,
+        sheets.push(Xdts {
+            cut: tl.int("CutIndexForName").to_string(),
+            scene: tl.int("SceneIndexForName").to_string(),
+            tables: vec![TimeTable {
+                name: tl.get("TimeLineName").as_str().unwrap_or("").to_string(),
+                duration: round_frame(end - start),
+                names,
+                tracks: xtracks,
+            }],
         });
     }
-    let first = targets[0];
-    Ok(Xdts {
-        cut: first.int("CutIndexForName").to_string(),
-        scene: first.int("SceneIndexForName").to_string(),
-        tables,
-    })
+    Ok(sheets)
 }
 
 /// 表示中（親フォルダも表示）のアニメーションフォルダを (名前, UUIDキー) でパレット順に返す
