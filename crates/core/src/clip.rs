@@ -169,30 +169,18 @@ pub fn convert(file: &[u8], opt: &Options) -> Result<Vec<Sheet>, String> {
             }
         }
 
+        let duration = round_frame(end - start).max(0) as usize;
         let mut names = Vec::new();
         let mut xtracks = Vec::new();
         for (name, uuid) in &folders {
             let Some(row) = tracks.get(uuid) else {
                 continue;
             };
+            let (keys, end_frame) = track_keys(&clip, row, fps, start, end)?;
+            let Some(frames) = export_frames(keys, end_frame, duration) else {
+                continue;
+            };
             names.push(name.clone());
-            let (keys, end_frame) = track_keys(&clip, row, fps)?;
-            // 共有クレートの変化点モデル。フレーム番号は 0 起点の usize
-            let mut frames: Vec<(usize, String)> = Vec::new();
-            for (fr, nm) in keys {
-                let v = nm.unwrap_or_else(|| NULL_CELL.to_string());
-                if frames.last().map(|(_, last)| *last == v).unwrap_or(false) {
-                    continue;
-                }
-                frames.push((fr.max(0) as usize, v));
-            }
-            match (frames.last(), end_frame) {
-                (None, _) => frames.push((0, NULL_CELL.into())),
-                (Some((_, last)), Some(e)) if last != NULL_CELL => {
-                    frames.push((e.max(0) as usize, NULL_CELL.into()))
-                }
-                _ => {}
-            }
             // 変化点は文字列で畳んでから、クレートの Cell に移す（p1 のマークは .clip から出ない）
             xtracks.push(Track {
                 frames: frames.into_iter().map(|(f, v)| (f, v.into())).collect(),
@@ -203,7 +191,7 @@ pub fn convert(file: &[u8], opt: &Options) -> Result<Vec<Sheet>, String> {
             scene: tl.int("SceneIndexForName").to_string(),
             tables: vec![TimeTable {
                 name: tl.get("TimeLineName").as_str().unwrap_or("").to_string(),
-                duration: round_frame(end - start).max(0) as usize,
+                duration,
                 columns: names,
                 tracks: xtracks,
                 // 東映 DTS が保存したシートは頭に 24 コマ・尻に 48 コマの
@@ -218,6 +206,52 @@ pub fn convert(file: &[u8], opt: &Options) -> Result<Vec<Sheet>, String> {
         });
     }
     Ok(sheets)
+}
+
+/// トラックの変化点を、シートに載る範囲（0 〜 尺-1）に切り詰めて畳む。
+///
+/// 尺より前のコマ（マイナス）で最後に出ていたセルは 0 コマ目へ持ち越す（空セルは持ち越さない）。
+/// 尺以降の変化点は捨て、クリップ終端の空セルだけは尺を越えていても残す。
+/// 載せる変化点が 1 つも無いトラックは None（列ごと出さない）
+fn export_frames(
+    keys: Vec<(i64, Option<String>)>,
+    end_frame: Option<i64>,
+    duration: usize,
+) -> Option<Vec<(usize, String)>> {
+    let last = duration.max(1) as i64 - 1;
+    let mut carry = None;
+    let mut inside = Vec::new();
+    for (f, v) in keys.into_iter().filter(|k| k.0 <= last) {
+        if f < 0 {
+            carry = Some(v);
+        } else {
+            inside.push((f, v));
+        }
+    }
+    if let Some(Some(v)) = carry
+        && inside.first().is_none_or(|k| k.0 != 0)
+    {
+        inside.insert(0, (0, Some(v)));
+    }
+    if inside.is_empty() {
+        return None;
+    }
+    if let Some(e) = end_frame
+        && e >= 0
+        && e > inside.last().map_or(i64::MIN, |k| k.0)
+    {
+        inside.push((e, None));
+    }
+    // 共有クレートの変化点モデル。フレーム番号は 0 起点の usize。同じセルが続く変化点は畳む
+    let mut frames: Vec<(usize, String)> = Vec::new();
+    for (f, v) in inside {
+        let v = v.unwrap_or_else(|| NULL_CELL.to_string());
+        if frames.last().is_some_and(|(_, prev)| *prev == v) {
+            continue;
+        }
+        frames.push((f as usize, v));
+    }
+    Some(frames)
 }
 
 /// 表示中（親フォルダも表示）のアニメーションフォルダを (名前, UUIDキー) でパレット順に返す
@@ -281,12 +315,152 @@ fn visible_anim_folders(db: &Db) -> Result<Vec<(String, String)>, String> {
     Ok(out)
 }
 
-/// トラックの (コマ, セル名 / None=空セル) と、クリップ終端のコマを返す
+/// トラックの変化点 (コマ, セル名 / None=空セル) と、クリップ終端のコマ
+type TrackKeys = (Vec<(i64, Option<String>)>, Option<i64>);
+
+/// ActionNodeClip 1 本ぶんのセル露出。フレームはタイムラインの絶対フレーム（丸め前）
+struct CelClip {
+    start: f64,
+    end: f64,
+    keys: Vec<(f64, Option<String>)>,
+}
+
+/// 整数に十分近ければ整数に寄せる（浮動小数の誤差を消す）
+fn frame_coordinate(v: f64) -> f64 {
+    let r = v.round();
+    if (v - r).abs() < 1e-7 { r } else { v }
+}
+
+/// JavaScript の Math.round と同じ（.5 は +∞ 側）
+fn js_round(x: f64) -> f64 {
+    (x + 0.5).floor()
+}
+
+fn num(node: &cmt::Node, name: &str) -> Result<f64, String> {
+    node.child(name)
+        .and_then(|n| n.f64())
+        .filter(|v| v.is_finite())
+        .ok_or_else(|| format!("mixer: {} の時間の値が読めません", node.name))
+}
+
+fn f64s(node: Option<&cmt::Node>) -> Option<Vec<f64>> {
+    match node.map(|n| &n.val) {
+        Some(cmt::Val::F64s(v)) => Some(v.clone()),
+        Some(cmt::Val::I32s(v)) => Some(v.iter().map(|x| *x as f64).collect()),
+        _ => None,
+    }
+}
+
+/// ActionNodeClip 1 本を読む。セル（ImageCelName）を持たないクリップは None。
+///
+/// キーの時刻はクリップ内のローカル時間（TimeInfo.Rate 単位）。それを
+/// MotionClip（素材側の使用範囲）から TimeClip（タイムライン上の配置）へ写して
+/// タイムラインのフレームにする
+fn cel_clip(c: &cmt::Node, fps: f64) -> Result<Option<CelClip>, String> {
+    let Some(anim) = c.child("AnimInfo") else {
+        return Ok(None);
+    };
+    let curve = anim
+        .kids
+        .iter()
+        .find(|n| n.name == "FCurve" && n.attr("Type") == Some("ImageCelName"));
+    let param = anim
+        .kids
+        .iter()
+        .find(|n| n.name == "Param" && n.attr("Name") == Some("ImageCelName"));
+    if curve.is_none() && param.is_none() {
+        return Ok(None);
+    }
+    let (Some(time), Some(motion), Some(info)) = (
+        c.child("TimeClip"),
+        c.child("MotionClip"),
+        c.child("TimeInfo"),
+    ) else {
+        return Err("mixer: クリップの時間情報がありません".into());
+    };
+    let (time_rate, motion_rate, curve_rate) =
+        (num(time, "Rate")?, num(motion, "Rate")?, num(info, "Rate")?);
+    if !(time_rate > 0.0 && motion_rate > 0.0 && curve_rate > 0.0) {
+        return Err("mixer: クリップの時間の単位が不正です".into());
+    }
+    let time_start = num(time, "Start")? / time_rate;
+    let time_end = num(time, "End")? / time_rate;
+    let motion_start = num(motion, "Start")? / motion_rate;
+    let motion_end = num(motion, "End")? / motion_rate;
+    if !(time_end > time_start && motion_end > motion_start) {
+        return Err("mixer: クリップの時間範囲が不正です".into());
+    }
+    let start = frame_coordinate(time_start * fps);
+    let end = frame_coordinate(time_end * fps);
+
+    let default_tag = param.and_then(|p| p.attr("Tag")).filter(|t| !t.is_empty());
+    let mut channel: Vec<(f64, Option<String>)> = Vec::new();
+    if let Some(fc) = curve {
+        let frames = f64s(fc.child("Frame")).unwrap_or_default();
+        let values = f64s(fc.child("Value"));
+        let tags = match fc.child("Tag").map(|n| &n.val) {
+            Some(cmt::Val::Strs(v)) => Some(v.clone()),
+            _ => None,
+        };
+        // Tag の無い曲線は、Param があって既定タグが空で Value が全部 0 のときだけ空セル扱い
+        let tags = match tags {
+            Some(t) => t,
+            None if param.is_some()
+                && default_tag.is_none()
+                && values
+                    .as_ref()
+                    .is_some_and(|v| v.len() == frames.len() && v.iter().all(|x| *x == 0.0)) =>
+            {
+                vec![String::new(); frames.len()]
+            }
+            None => return Err("mixer: セルのキーが不正です".into()),
+        };
+        if tags.len() != frames.len() {
+            return Err("mixer: セルのキーが不正です".into());
+        }
+        let mut prev = f64::NEG_INFINITY;
+        for (f, t) in frames.iter().zip(tags) {
+            if !(f.is_finite() && *f > prev) {
+                return Err("mixer: セルのキーが不正です".into());
+            }
+            prev = *f;
+            channel.push((*f, (!t.is_empty()).then_some(t)));
+        }
+    }
+
+    let mut keys = Vec::new();
+    let mut carry = default_tag.map(str::to_string);
+    for (tick, value) in channel {
+        let local = tick / curve_rate;
+        if local <= motion_start {
+            carry = value.clone();
+        }
+        if local < motion_start || local >= motion_end {
+            continue;
+        }
+        let f = frame_coordinate(
+            (time_start
+                + (local - motion_start) * (time_end - time_start) / (motion_end - motion_start))
+                * fps,
+        );
+        keys.push((f, value));
+    }
+    // クリップの頭にキーが無ければ、直前の（または既定の）セルがクリップ頭から出る
+    if keys.first().is_none_or(|k| k.0 > start) {
+        keys.insert(0, (start, carry));
+    }
+    Ok(Some(CelClip { start, end, keys }))
+}
+
+/// トラックの変化点 (コマ, セル名 / None=空セル) と、クリップ終端のコマを返す。
+/// コマはタイムラインの StartFrame を 0 とした値
 fn track_keys(
     clip: &Clip,
     row: &Row,
     fps: f64,
-) -> Result<(Vec<(i64, Option<String>)>, Option<i64>), String> {
+    tl_start: f64,
+    tl_end: f64,
+) -> Result<TrackKeys, String> {
     let mut raw = None;
     for col in ["TrackActionMixer2", "TrackActionMixer"] {
         if let Some(id) = row.get(col).as_bytes() {
@@ -296,51 +470,277 @@ fn track_keys(
             }
         }
     }
+    // セルのデータが無いトラックは空セルだけの列
     let Some(raw) = raw else {
-        return Ok((Vec::new(), None));
+        return Ok((vec![(0, None)], None));
     };
-    let doc = cmt::parse(&raw)?;
-    let mut keys = Vec::new();
-    let mut end_frame = None;
+    mixer_keys(&cmt::parse(&raw)?, fps, tl_start, tl_end)
+}
+
+/// TrackActionMixer の木から、トラックの変化点とクリップ終端のコマを組み立てる
+fn mixer_keys(doc: &cmt::Node, fps: f64, tl_start: f64, tl_end: f64) -> Result<TrackKeys, String> {
+    let mut nodes = Vec::new();
+    doc.find_all("ActionNodeClip", &mut nodes);
     let mut clips = Vec::new();
-    doc.find_all("ActionNodeClip", &mut clips);
-    for c in clips {
-        let mut rate = 60.0;
-        if let Some(tc) = c.child("TimeClip") {
-            if let Some(r) = tc.child("Rate").and_then(|n| n.f64()) {
-                rate = r;
-            }
-            if let Some(e) = tc.child("End").and_then(|n| n.f64()) {
-                end_frame = Some(round_frame(e * fps / rate));
-            }
-        }
-        let mut curves = Vec::new();
-        c.find_all("FCurve", &mut curves);
-        for fc in curves {
-            if fc.attr("Type") != Some("ImageCelName") {
-                continue;
-            }
-            let frames = match fc.child("Frame").map(|n| &n.val) {
-                Some(cmt::Val::F64s(v)) => v.clone(),
-                _ => Vec::new(),
-            };
-            let tags = match fc.child("Tag").map(|n| &n.val) {
-                Some(cmt::Val::Strs(v)) => v.clone(),
-                _ => Vec::new(),
-            };
-            let values = match fc.child("Value").map(|n| &n.val) {
-                Some(cmt::Val::F64s(v)) => v.clone(),
-                _ => Vec::new(),
-            };
-            for (i, t) in frames.iter().enumerate() {
-                let mut name = tags.get(i).cloned();
-                if name.as_deref() == Some("") || values.get(i).map(|v| *v < 0.0).unwrap_or(false) {
-                    name = None;
-                }
-                keys.push((round_frame(t * fps / rate), name));
-            }
+    for c in nodes {
+        if let Some(cc) = cel_clip(c, fps)? {
+            clips.push(cc);
         }
     }
-    keys.sort_by_key(|k| k.0);
-    Ok((keys, end_frame))
+    if clips.is_empty() {
+        return Ok((vec![(0, None)], None));
+    }
+    clips.sort_by(|a, b| a.start.total_cmp(&b.start));
+    if clips.windows(2).any(|w| w[0].end > w[1].start) {
+        return Err("セルのクリップが重なっています".into());
+    }
+
+    let work_start = tl_start.min(clips[0].start);
+    let work_end = clips
+        .iter()
+        .filter_map(|c| c.keys.last().map(|k| k.0 + 1.0))
+        .fold(tl_end, f64::max);
+    // 同じコマに複数の変化点が来たら後のものが勝つ
+    let mut events: Vec<(f64, Option<String>)> = vec![(work_start, None)];
+    let mut set = |f: f64, v: Option<String>| match events.iter_mut().find(|e| e.0 == f) {
+        Some(e) => e.1 = v,
+        None => events.push((f, v)),
+    };
+    for c in &clips {
+        for (f, v) in &c.keys {
+            set(*f, v.clone());
+        }
+        if c.end < work_end {
+            set(c.end, None);
+        }
+    }
+    events.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+    let to_int = |f: f64, what: &str| -> Result<i64, String> {
+        let r = js_round(f);
+        if (f - r).abs() >= 1e-3 {
+            return Err(format!("{}が整数フレームに一致しません", what));
+        }
+        Ok(r as i64)
+    };
+    let mut keys = Vec::with_capacity(events.len());
+    for (f, v) in events {
+        keys.push((to_int(f - tl_start, "セル露出の位置")?, v));
+    }
+    let raw_end = clips
+        .iter()
+        .map(|c| c.end)
+        .fold(f64::NEG_INFINITY, f64::max)
+        - tl_start;
+    Ok((keys, Some(to_int(raw_end, "セル露出の終端")?)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cmt::{Node, Val};
+
+    fn node(name: &str, val: Val, attrs: &[(&str, &str)], kids: Vec<Node>) -> Node {
+        Node {
+            name: name.into(),
+            val,
+            attrs: attrs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            kids,
+        }
+    }
+
+    fn range(name: &str, start: f64, end: f64, rate: f64) -> Node {
+        node(
+            name,
+            Val::None,
+            &[],
+            vec![
+                node("Start", Val::F64(start), &[], vec![]),
+                node("End", Val::F64(end), &[], vec![]),
+                node("Rate", Val::F64(rate), &[], vec![]),
+            ],
+        )
+    }
+
+    /// セルのクリップ 1 本。時間はすべてフレーム（24fps）で渡し、CSP と同じく
+    /// TimeClip/MotionClip は 60 単位、キーは TimeInfo.Rate=24 で持たせる
+    fn cel_clip_node(time: (f64, f64), motion: (f64, f64), keys: &[(f64, &str)]) -> Node {
+        let s = 60.0 / 24.0;
+        node(
+            "ActionNodeClip",
+            Val::None,
+            &[],
+            vec![
+                range("TimeClip", time.0 * s, time.1 * s, 60.0),
+                range("MotionClip", motion.0 * s, motion.1 * s, 60.0),
+                node(
+                    "TimeInfo",
+                    Val::None,
+                    &[],
+                    vec![node("Rate", Val::F64(24.0), &[], vec![])],
+                ),
+                node(
+                    "AnimInfo",
+                    Val::None,
+                    &[],
+                    vec![node(
+                        "FCurve",
+                        Val::None,
+                        &[("Type", "ImageCelName")],
+                        vec![
+                            node(
+                                "Frame",
+                                Val::F64s(keys.iter().map(|k| k.0).collect()),
+                                &[],
+                                vec![],
+                            ),
+                            node(
+                                "Tag",
+                                Val::Strs(keys.iter().map(|k| k.1.to_string()).collect()),
+                                &[],
+                                vec![],
+                            ),
+                        ],
+                    )],
+                ),
+            ],
+        )
+    }
+
+    fn general(clips: Vec<Node>) -> Node {
+        node("General", Val::None, &[], clips)
+    }
+
+    fn sheet_frames(doc: &Node, duration: usize) -> Vec<(usize, String)> {
+        let (keys, end) = mixer_keys(doc, 24.0, 0.0, duration as f64).unwrap();
+        export_frames(keys, end, duration).unwrap()
+    }
+
+    fn fr(v: &[(usize, &str)]) -> Vec<(usize, String)> {
+        v.iter().map(|(f, s)| (*f, s.to_string())).collect()
+    }
+
+    /// タイムライン上でクリップを後ろへ置いたら、キーもその位置から出る。
+    /// 頭の空きは空セル（C12 (1).clip: 35 コマ目に置かれたクリップが 0 コマ目から出ていた）
+    #[test]
+    fn clip_placed_later_on_timeline() {
+        let doc = general(vec![cel_clip_node(
+            (35.0, 80.0),
+            (0.0, 45.0),
+            &[(0.0, "1"), (1.0, "1a"), (2.0, "2")],
+        )]);
+        assert_eq!(
+            sheet_frames(&doc, 80),
+            fr(&[
+                (0, NULL_CELL),
+                (35, "1"),
+                (36, "1a"),
+                (37, "2"),
+                (80, NULL_CELL)
+            ])
+        );
+    }
+
+    /// 素材の途中から使うクリップ（イン点あり）。MotionClip の頭がタイムラインの
+    /// クリップ頭に来る（C12 (1).clip: 尺を越えた 61〜105 コマに出ていた）
+    #[test]
+    fn clip_with_in_point() {
+        let doc = general(vec![cel_clip_node(
+            (35.0, 80.0),
+            (26.0, 71.0),
+            &[(0.0, "0"), (26.0, "1"), (28.0, "2"), (70.0, "24")],
+        )]);
+        assert_eq!(
+            sheet_frames(&doc, 80),
+            fr(&[
+                (0, NULL_CELL),
+                (35, "1"),
+                (37, "2"),
+                (79, "24"),
+                (80, NULL_CELL)
+            ])
+        );
+    }
+
+    /// イン点より前で最後に出ていたセルが、クリップの頭から出る
+    #[test]
+    fn in_point_carries_previous_cel() {
+        let doc = general(vec![cel_clip_node(
+            (0.0, 24.0),
+            (10.0, 34.0),
+            &[(0.0, "1"), (5.0, "2"), (20.0, "3")],
+        )]);
+        assert_eq!(
+            sheet_frames(&doc, 24),
+            fr(&[(0, "2"), (10, "3"), (24, NULL_CELL)])
+        );
+    }
+
+    /// 最初の露出が 0 コマ目より後なら、0 コマ目に空セルを置く
+    /// （BRN_c013_si.clip / GED_c042_si_r.clip で抜けていた）
+    #[test]
+    fn leading_empty_cell() {
+        let doc = general(vec![cel_clip_node(
+            (0.0, 48.0),
+            (0.0, 48.0),
+            &[(0.0, ""), (12.0, "1"), (24.0, "2")],
+        )]);
+        assert_eq!(
+            sheet_frames(&doc, 48),
+            fr(&[(0, NULL_CELL), (12, "1"), (24, "2"), (48, NULL_CELL)])
+        );
+    }
+
+    /// 尺を越えた変化点は捨てるが、クリップ終端の空セルは残す
+    #[test]
+    fn keys_past_duration_are_dropped() {
+        let doc = general(vec![cel_clip_node(
+            (0.0, 120.0),
+            (0.0, 120.0),
+            &[(0.0, "1"), (60.0, "2"), (63.0, "3")],
+        )]);
+        assert_eq!(
+            sheet_frames(&doc, 62),
+            fr(&[(0, "1"), (60, "2"), (120, NULL_CELL)])
+        );
+    }
+
+    /// 0 コマ目より前（マイナス）の変化点は、最後のものだけ 0 コマ目へ持ち越す
+    #[test]
+    fn keys_before_start_carry_into_frame_zero() {
+        let doc = general(vec![cel_clip_node(
+            (-24.0, 24.0),
+            (0.0, 48.0),
+            &[(0.0, "1"), (6.0, "2"), (12.0, "3"), (30.0, "4")],
+        )]);
+        assert_eq!(
+            sheet_frames(&doc, 24),
+            fr(&[(0, "3"), (6, "4"), (24, NULL_CELL)])
+        );
+    }
+
+    /// 2 本のクリップの間は空セル
+    #[test]
+    fn gap_between_clips_is_empty() {
+        let doc = general(vec![
+            cel_clip_node((0.0, 10.0), (0.0, 10.0), &[(0.0, "1")]),
+            cel_clip_node((20.0, 30.0), (0.0, 10.0), &[(0.0, "2")]),
+        ]);
+        assert_eq!(
+            sheet_frames(&doc, 30),
+            fr(&[(0, "1"), (10, NULL_CELL), (20, "2"), (30, NULL_CELL)])
+        );
+    }
+
+    #[test]
+    fn overlapping_clips_are_rejected() {
+        let doc = general(vec![
+            cel_clip_node((0.0, 20.0), (0.0, 20.0), &[(0.0, "1")]),
+            cel_clip_node((10.0, 30.0), (0.0, 20.0), &[(0.0, "2")]),
+        ]);
+        assert!(mixer_keys(&doc, 24.0, 0.0, 30.0).is_err());
+    }
 }
