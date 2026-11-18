@@ -4,9 +4,10 @@
 //!   clip2xdts -o out/ カット/       フォルダ内の .clip をまとめて変換
 //!   clip2xdts -f tdts ...          東映 DTS 形式 (.tdts) で書き出す
 //!   clip2xdts --all-timelines ...  全タイムラインを書き出す
+//!   clip2xdts --paper ...          紙のタイムシート（PNG）も書き出す
 
-use clip2xdts_core::{clip, collect_clips, run_batch, Format, Job};
-use std::path::PathBuf;
+use clip2xdts_core::{clip, collect_clips, run_batch, sheet::Sheet, Format, Job};
+use std::path::{Path, PathBuf};
 
 const USAGE: &str = "\
 使い方: clip2xdts [オプション] <.clip ファイル または フォルダ>...
@@ -15,6 +16,7 @@ const USAGE: &str = "\
   -o, --out <フォルダ>   出力先（省略時は .clip と同じ場所）
   -f, --format <形式>    xdts / tdts / both（省略時は xdts）
       --all-timelines   全タイムラインを書き出す（省略時は選択中のタイムラインのみ）
+      --paper           紙のタイムシート（A4 の PNG、6 秒を超えると _1, _2 …）も書き出す
   -j, --jobs <数>        同時に処理するファイル数（省略時は CPU コア数）
   -h, --help            このヘルプを表示
   -V, --version         バージョンを表示";
@@ -26,6 +28,7 @@ fn main() {
     let mut options = clip::Options { all_timelines: false };
     let mut format = Format::Xdts;
     let mut jobs = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+    let mut paper = false;
     while let Some(a) = args.next() {
         match a.as_str() {
             "-h" | "--help" => {
@@ -51,6 +54,7 @@ fn main() {
                 jobs = args.next().and_then(|v| v.parse().ok()).unwrap_or(jobs).max(1)
             }
             "--all-timelines" => options.all_timelines = true,
+            "--paper" => paper = true,
             s if s.starts_with('-') && s.len() > 1 => {
                 eprintln!("不明なオプション: {}\n\n{}", s, USAGE);
                 std::process::exit(2);
@@ -72,7 +76,16 @@ fn main() {
     for i in &inputs {
         collect_clips(i, &mut files);
     }
-    let job = Job { out_dir: out_dir.as_deref(), format, options, jobs };
+    let draw = |sheet: &Sheet, base: &Path| {
+        clip2xdts_paper::write_pages(sheet, &clip2xdts_paper::Header::for_sheet(sheet), base)
+    };
+    let job = Job {
+        out_dir: out_dir.as_deref(),
+        format,
+        options,
+        jobs,
+        extra: if paper { Some(&draw) } else { None },
+    };
     let results = run_batch(&files, &job, || {});
 
     let (mut ok, mut ng) = (0, 0);

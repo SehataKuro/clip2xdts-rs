@@ -601,6 +601,7 @@ name = "clip2xdts"
 version = "0.1.2"
 dependencies = [
  "clip2xdts-core",
+ "clip2xdts-paper",
 ]
 
 [[package]]
@@ -615,9 +616,19 @@ name = "clip2xdts-gui"
 version = "0.1.2"
 dependencies = [
  "clip2xdts-core",
+ "clip2xdts-paper",
  "eframe",
  "egui",
  "rfd",
+]
+
+[[package]]
+name = "clip2xdts-paper"
+version = "0.1.2"
+dependencies = [
+ "ab_glyph",
+ "image",
+ "xdts",
 ]
 
 [[package]]

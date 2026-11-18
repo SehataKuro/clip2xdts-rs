@@ -1,0 +1,10 @@
+[package]
+name = "clip2xdts-paper"
+description = "タイムシート (xdts::Sheet) を紙のタイムシートの形の画像にする"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+xdts = "0.1.1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+ab_glyph = "0.2"

@@ -34,12 +34,19 @@ impl Format {
     }
 }
 
+/// シート 1 枚ごとに呼ぶ追加の書き出し（紙のタイムシートなど）。
+/// 引数はシートと、拡張子なしの書き出し先（`out/a` や `out/a_sheet2`）。
+/// 書き出したファイルを返す
+pub type Extra = dyn Fn(&sheet::Sheet, &Path) -> Result<Vec<PathBuf>, String> + Sync;
+
 /// 一括変換の指定
 pub struct Job<'a> {
     pub out_dir: Option<&'a Path>,
     pub format: Format,
     pub options: clip::Options,
     pub jobs: usize,
+    /// タイムシートの横に書き出すもの（無ければ None）
+    pub extra: Option<&'a Extra>,
 }
 
 /// ファイルなら自身、フォルダならサブフォルダまで辿って .clip を集める
@@ -90,6 +97,9 @@ pub fn convert_one(src: &Path, job: &Job) -> Result<Vec<PathBuf>, String> {
             std::fs::write(&dst, body).map_err(|e| format!("書き込めません: {}", e))?;
             dsts.push(dst);
         }
+        if let Some(extra) = job.extra {
+            dsts.extend(extra(sheet, &dir.join(sheet_base(&stem, i, sheets.len())))?);
+        }
     }
     Ok(dsts)
 }
@@ -97,12 +107,18 @@ pub fn convert_one(src: &Path, job: &Job) -> Result<Vec<PathBuf>, String> {
 /// 書き出すファイル名。シートが 1 枚なら `a.xdts`、
 /// 複数なら `a_sheet1.xdts` `a_sheet2.xdts` … と連番を付ける
 fn sheet_name(stem: &std::ffi::OsStr, i: usize, total: usize, ext: &str) -> std::ffi::OsString {
+    let mut name = sheet_base(stem, i, total);
+    name.push(".");
+    name.push(ext);
+    name
+}
+
+/// [`sheet_name`] の拡張子の前まで
+fn sheet_base(stem: &std::ffi::OsStr, i: usize, total: usize) -> std::ffi::OsString {
     let mut name = stem.to_os_string();
     if total > 1 {
         name.push(format!("_sheet{}", i + 1));
     }
-    name.push(".");
-    name.push(ext);
     name
 }
 

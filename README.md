@@ -35,6 +35,7 @@ Windows 向けの exe は GitHub Actions の `Release` でも作れます。手�
     clip2xdts -f tdts カット/*.clip     # 東映 DTS 形式 (.tdts) で書き出す
     clip2xdts -f both カット/*.clip     # 両方の形式を書き出す
     clip2xdts --all-timelines a.clip   # 全タイムラインを書き出す
+    clip2xdts --paper a.clip           # 紙のタイムシート（PNG）も書き出す
     clip2xdts -j 4 ...                 # 同時に処理するファイル数を指定
 
 ## 出力形式
@@ -45,6 +46,12 @@ Windows 向けの exe は GitHub Actions の `Release` でも作れます。手�
 | `.tdts` | 東映アニメーション デジタルタイムシート version 10 |
 
 読み込みにも対応していて、書き出した `.xdts` / `.tdts` をそのまま読み返せます。
+
+`--paper`（GUI では「紙のタイムシート」）を付けると、タイムシートの隣に紙のタイムシートの形の
+PNG（A4・150dpi）も書き出します。セルの列が 5 本までは 1 枚 6 秒の A〜E、6 本以上は 1 枚 3 秒の
+A〜J で、複数枚になると `a_1.png`・`a_2.png` … と分かれます。原画欄（ACTION）にはセルの切り替えを
+丸囲みで、p1 の印があれば中割参考を三角囲みで、中割指示（`SYMBOL_TICK_1` / `_2`）を ・ と小さい ○ で
+描きます。文字は OS の日本語フォントで描きます。
 
 `.tdts` は `.xdts` と同系統の JSON（1 行目にマジック行）ですが、字下げは 4 スペースで、全体を
 `timeSheets[]` で包み、セルに `fontColorId` が付き、文字色表・作業伝票の枠を持ちます。
@@ -84,7 +91,7 @@ Windows 向けの exe は GitHub Actions の `Release` でも作れます。手�
 
 ## 構成
 
-3 つの crate のワークスペースです。変換の中身は `core` だけにあり、CLI と GUI は
+4 つの crate のワークスペースです。変換の中身は `core` だけにあり、CLI と GUI は
 その薄い皮です。XDTS / TDTS 自体の読み書きは共有クレート
 [xdts](https://crates.io/crates/xdts)（[SehataKuro/xdts](https://github.com/SehataKuro/xdts)）
 にあり、`core` の依存はこれ 1 つだけ
@@ -96,6 +103,7 @@ Windows 向けの exe は GitHub Actions の `Release` でも作れます。手�
 | `crates/core` | .clip の読み取りと XDTS / TDTS の組み立て。依存は `xdts` のみ |
 | `crates/cli`  | `clip2xdts` コマンド |
 | `crates/gui`  | `clip2xdts-gui`（egui / rfd） |
+| `crates/paper` | タイムシート（`xdts::Sheet`）を紙のタイムシートの形の画像にする（image / ab_glyph）。CLI・GUI の `--paper` が使う。`core` は依存しない |
 
 `crates/core` の中身:
 

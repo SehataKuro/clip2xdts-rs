@@ -51,6 +51,8 @@ struct App {
     out_dir: Option<PathBuf>,
     format: FormatChoice,
     all_timelines: bool,
+    /// 紙のタイムシート（PNG）も書き出す
+    paper: bool,
     log: Vec<Line>,
     running: Option<Running>,
 }
@@ -85,16 +87,21 @@ impl App {
         let out_dir = self.out_dir.clone();
         let format: Format = self.format.into();
         let all_timelines = self.all_timelines;
+        let paper = self.paper;
         let total = files.len();
         let done = Arc::new(AtomicUsize::new(0));
         let counter = done.clone();
         let (tx, rx) = channel();
         std::thread::spawn(move || {
+            let draw = |sheet: &clip2xdts_core::sheet::Sheet, base: &std::path::Path| {
+                clip2xdts_paper::write_pages(sheet, &clip2xdts_paper::Header::for_sheet(sheet), base)
+            };
             let job = Job {
                 out_dir: out_dir.as_deref(),
                 format,
                 options: clip::Options { all_timelines },
                 jobs: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4),
+                extra: if paper { Some(&draw) } else { None },
             };
             let results = run_batch(&files, &job, || {
                 counter.fetch_add(1, Ordering::SeqCst);
@@ -282,6 +289,13 @@ impl App {
                 ui.checkbox(&mut self.all_timelines, "").on_hover_text(
                     "クリスタのタイムラインを複数持つファイルで、選択中の 1 本ではなく
                      全部を書き出します。2 本以上あるときは a_sheet1 / a_sheet2 … に分かれます",
+                );
+            });
+            widgets::divider(ui);
+            widgets::row(ui, "紙のタイムシート", |ui| {
+                ui.checkbox(&mut self.paper, "").on_hover_text(
+                    "タイムシートの隣に、紙のタイムシート（A4 の PNG）も書き出します。
+                     6 秒を超えると a_1.png / a_2.png … に分かれます",
                 );
             });
         });
